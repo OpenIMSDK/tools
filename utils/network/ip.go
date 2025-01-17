@@ -37,8 +37,13 @@ func GetLocalIP() (string, error) {
 		return "", err
 	}
 	// Iterate over each interface
-	var publicIP string
+	var publicIP, privateIP string
 	for _, iface := range interfaces {
+		// 排除 Docker 虚拟网卡
+		if isDockerInterface(iface.Name) {
+			continue
+		}
+
 		// Check if the interface is up and not a loopback
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
@@ -59,26 +64,42 @@ func GetLocalIP() (string, error) {
 			}
 
 			ip4 := ipNet.IP.To4()
-			if ip4 != nil && !ip4.IsLoopback() {
-				// Ensure the IP is not a multicast address
-				if !ip4.IsMulticast() {
-					if !ipNet.IP.IsPrivate() && publicIP == "" {
-						// Priority return to internal network IP
-						publicIP = ipNet.IP.String()
-					} else {
-						return ip4.String(), nil
-					}
+			if ip4 == nil {
+				continue
+			}
 
-				}
+			// exclude multicast
+			if ip4.IsMulticast() {
+				continue
+			}
+
+			// check if public ip
+			if !ip4.IsPrivate() {
+				publicIP = ip4.String()
+				break
+			}
+
+			if privateIP == "" {
+				privateIP = ip4.String()
 			}
 		}
 	}
 
+	// pbulic ip first
 	if publicIP != "" {
 		return publicIP, nil
 	}
+	if privateIP != "" {
+		return privateIP, nil
+	}
+
 	// If no suitable IP is found, return an error
 	return "", errors.New("no suitable local IP address found")
+}
+
+// check if virtual network
+func isDockerInterface(name string) bool {
+	return strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "veth")
 }
 
 func GetRpcRegisterIP(configIP string) (string, error) {
